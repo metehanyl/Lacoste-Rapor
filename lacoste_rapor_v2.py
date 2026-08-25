@@ -121,77 +121,124 @@ def oku_excel(excel_yolu: Path):
     sheet = next((s for s in xl.sheet_names if "ANA TABLO" in s.upper()), xl.sheet_names[0])
     log(f"Sheet: {sheet}", "i")
 
+    # Satır 6'dan (index 6) kanal isimlerini oku
+    raw = pd.read_excel(excel_yolu, sheet_name=sheet, header=None)
+    kanal_row = raw.iloc[6] if len(raw) > 6 else pd.Series(dtype=object)
+    IGNORE = {'', 'nan', '50 adet', 'adet'}
+    kanallar_ham = []
+    for v in kanal_row:
+        vs = str(v).strip() if pd.notna(v) else ''
+        if vs and vs.lower() not in IGNORE:
+            try: float(vs); continue
+            except: pass
+            kanallar_ham.append(vs)
+    log(f"Kanallar: {kanallar_ham}", "i")
+
     df = pd.read_excel(excel_yolu, sheet_name=sheet, header=8)
     df.columns = [str(c).strip() for c in df.columns]
     df = df.dropna(subset=["M.R"]).reset_index(drop=True)
     log(f"{len(df)} satir okundu", "OK")
 
-    # Tum turetilmis kolonlari once hesapla, sonra tek seferde ekle
+    def fc(cols, *pats):
+        cu = [c.upper() for c in cols]
+        for p in pats:
+            pu = p.upper()
+            for i, c in enumerate(cu):
+                if pu in c:
+                    return cols[i]
+        return None
+
+    cols = list(df.columns)
+    RENKLER = ['#0057B8', '#C8B400', '#E8003D', '#FF6B00', '#9B59B6', '#1ABC9C', '#E74C3C', '#2ECC71']
+
+    # Dinamik KANALLAR oluştur
+    global KANALLAR
+    KANALLAR_YEN = {}
+    for idx_k, kanal in enumerate(kanallar_ham):
+        k_up = kanal.upper()
+        sip_h = fc(cols, f'Tüm {kanal}', f'{kanal} P10', f'{k_up} SİPARİŞ', f'{k_up} SIPARIS')
+        if not sip_h and k_up == 'LACOSTE':
+            sip_h = fc(cols, 'TR Sipariş Toplam', 'TR Siparis Toplam', 'TR Siparış Toplam')
+        if not sip_h:
+            sip_h = fc(cols, f'{k_up} TOPLAM', f'TÜM {k_up}')
+        if not sip_h:
+            continue  # Sipariş kolonu bulunamadı, bu kanalı atla
+
+        sip_d_extra = fc(cols, f'{kanal} Devir', 'Bayi Devir Adet', 'TR Devir Adet')
+        mag_ytd = fc(cols, f'TY SLSU(OMSHaric) {kanal}', f'{kanal} TY SLSU(OMSHaric)', f'SSTEP TY SLSU(OMSHaric)' if k_up=='SSTEP' else '__')
+        mag_sh  = fc(cols, f'TY SLSU(OMSHaric) {kanal} Son Hafta', f'{kanal} TY SLSU(OMSHaric) Son Hafta')
+        mag_mtd = fc(cols, f'Aylık TY SLSU(OMSHaric) {kanal}', f'{kanal} Aylık TY SLSU', f'Aylik TY SLSU(OMSHaric) {kanal}')
+        onl_ytd = fc(cols, f'Online Satış {kanal}', f'{kanal} Online Satış', f'{kanal} Online Satis')
+        onl_sh  = fc(cols, f'Online Son Hafta Satış {kanal}', f'{kanal} Online Son Hafta')
+        onl_mtd = fc(cols, f'Online Aylık Satış {kanal}', f'{kanal} Online Aylık', f'Online Aylik Satis {kanal}')
+        stok    = fc(cols, f'TY STKU (SonGun) {kanal}', f'{kanal} TY STKU')
+        ros_col = fc(cols, 'ROS', 'ross')
+        psf_col = fc(cols, 'PSF')
+
+        sevk = fc(cols, f'Dağıtım Sevk Tarihi {kanal}', f'{kanal} Sevk', 'Aktif Sevk Tarihi', 'Dagitim Sevk Tarihi')
+        KANALLAR_YEN[kanal] = {
+            "renk":    RENKLER[idx_k % len(RENKLER)],
+            "sip_haric": [sip_h] if sip_h else [],
+            "sip_dahil": [sip_h, sip_d_extra] if sip_d_extra and sip_h else ([sip_h] if sip_h else []),
+            "mag_ytd":  mag_ytd or "",
+            "mag_sh":   mag_sh  or "",
+            "mag_mtd":  mag_mtd or "",
+            "onl_ytd":  onl_ytd or "",
+            "onl_sh":   onl_sh  or "",
+            "onl_mtd":  onl_mtd or "",
+            "stok":     stok    or "",
+            "sevk":     sevk    or "",
+        }
+        log(f"  {kanal}: sip={sip_h}, mag={mag_ytd}, onl={onl_ytd}", "i")
+
+    if KANALLAR_YEN:
+        KANALLAR = KANALLAR_YEN
+    else:
+        log("Dinamik kanal tespiti başarısız, varsayılan kullanılıyor", "!")
+
     extras = {}
     for kanal, cfg in KANALLAR.items():
-        sip_h = sum(
-            (safe(df[find_col(df, c)]) for c in cfg["sip_haric"] if find_col(df, c) in df.columns),
-            pd.Series(0, index=df.index)
-        )
-        sip_d = sum(
-            (safe(df[find_col(df, c)]) for c in cfg["sip_dahil"] if find_col(df, c) in df.columns),
-            pd.Series(0, index=df.index)
-        )
+        sip_h_cols = [c for c in cfg["sip_haric"] if c and c in df.columns]
+        sip_d_cols = [c for c in cfg["sip_dahil"] if c and c in df.columns]
+        sh  = df[[c for c in sip_h_cols]].apply(pd.to_numeric,errors='coerce').fillna(0).sum(axis=1).clip(lower=0) if sip_h_cols else pd.Series(0,index=df.index)
+        sd  = df[[c for c in sip_d_cols]].apply(pd.to_numeric,errors='coerce').fillna(0).sum(axis=1).clip(lower=0) if sip_d_cols else sh
+        def gcol(key):
+            col=cfg.get(key,"")
+            return pd.to_numeric(df[col],errors='coerce').fillna(0).clip(lower=0) if col and col in df.columns else pd.Series(0,index=df.index)
+        my=gcol("mag_ytd"); ms=gcol("mag_sh"); mm=gcol("mag_mtd")
+        oy=gcol("onl_ytd"); os_=gcol("onl_sh"); om=gcol("onl_mtd")
+        st=gcol("stok")
+        strh=(my+oy)/sh.replace(0,float('nan'))*100
+        strd=(my+oy)/sd.replace(0,float('nan'))*100
+        # urun_listesi beklediği format
+        extras[f"_sh_{kanal}"]   = sh
+        extras[f"_sd_{kanal}"]   = sd
+        extras[f"_my_{kanal}"]   = my
+        extras[f"_oy_{kanal}"]   = oy
+        extras[f"_ty_{kanal}"]   = my+oy
+        extras[f"_ms_{kanal}"]   = ms
+        extras[f"_os_{kanal}"]   = os_
+        extras[f"_ts_{kanal}"]   = ms+os_
+        extras[f"_st_{kanal}"]   = st
+        extras[f"_ro_{kanal}"]   = pd.Series(0,index=df.index)
+        extras[f"_strh_{kanal}"] = strh.fillna(0).round(1)
+        extras[f"_strd_{kanal}"] = strd.fillna(0).round(1)
+        extras[f"_mmtd_{kanal}"] = mm
+        extras[f"_omtd_{kanal}"] = om
+        extras[f"_tmtd_{kanal}"] = mm+om
 
-        mag_c = find_col(df, cfg["mag_ytd"])
-        onl_c = find_col(df, cfg["onl_ytd"])
-        msh_c = find_col(df, cfg["mag_sh"]) if cfg["mag_sh"] else None
-        osh_c = find_col(df, cfg["onl_sh"]) if cfg["onl_sh"] else None
-        stk_c = find_col(df, cfg["stok"])
-        ros_c = find_col(df, cfg["ros"]) if cfg["ros"] else None
+    psf_c = fc(cols, "PSF")
+    extras["_psf"] = pd.to_numeric(df[psf_c], errors='coerce').fillna(0) if psf_c and psf_c in df.columns else pd.Series(0, index=df.index)
+    wms_c = fc(cols, "WMS")
+    extras["_wms"] = pd.to_numeric(df[wms_c], errors='coerce').fillna(0).clip(lower=0) if wms_c and wms_c in df.columns else pd.Series(0, index=df.index)
+    depo_c = fc(cols, "DEPO STOK")
+    extras["_depo"] = pd.to_numeric(df[depo_c], errors='coerce').fillna(0).clip(lower=0) if depo_c and depo_c in df.columns else pd.Series(0, index=df.index)
 
-        mag_ytd = safe(df[mag_c]) if mag_c in df.columns else pd.Series(0, index=df.index)
-        onl_ytd = safe(df[onl_c]) if onl_c in df.columns else pd.Series(0, index=df.index)
-        mag_sh  = safe(df[msh_c]) if msh_c and msh_c in df.columns else pd.Series(0, index=df.index)
-        onl_sh  = safe(df[osh_c]) if osh_c and osh_c in df.columns else pd.Series(0, index=df.index)
-        stok    = safe(df[stk_c]) if stk_c in df.columns else pd.Series(0, index=df.index)
-        ros     = safe(df[ros_c]) if ros_c and ros_c in df.columns else pd.Series(0, index=df.index)
+    img_c = fc(cols, "Fotograf", "Image", "Resim", "IMG")
+    extras["_img"] = df[img_c].fillna("") if img_c and img_c in df.columns else pd.Series("", index=df.index)
 
-        top_ytd  = mag_ytd + onl_ytd
-        top_sh   = mag_sh  + onl_sh
-        str_h    = (top_ytd / sip_h.replace(0, 1) * 100).round(1)
-        str_d    = (top_ytd / sip_d.replace(0, 1) * 100).round(1)
+    return pd.concat([df, pd.DataFrame(extras, index=df.index)], axis=1)
 
-        extras[f"_sh_{kanal}"]   = sip_h
-        extras[f"_sd_{kanal}"]   = sip_d
-        extras[f"_my_{kanal}"]   = mag_ytd
-        extras[f"_oy_{kanal}"]   = onl_ytd
-        extras[f"_ty_{kanal}"]   = top_ytd
-        extras[f"_ms_{kanal}"]   = mag_sh
-        extras[f"_os_{kanal}"]   = onl_sh
-        extras[f"_ts_{kanal}"]   = top_sh
-        extras[f"_st_{kanal}"]   = stok
-        extras[f"_ro_{kanal}"]   = ros
-        extras[f"_strh_{kanal}"] = str_h
-        extras[f"_strd_{kanal}"] = str_d
-
-        # MTD (Aylik)
-        mag_mtd_c = find_col(df, cfg.get("mag_mtd","")) if cfg.get("mag_mtd") else None
-        onl_mtd_c = find_col(df, cfg.get("onl_mtd","")) if cfg.get("onl_mtd") else None
-        mag_mtd = safe(df[mag_mtd_c]) if mag_mtd_c and mag_mtd_c in df.columns else pd.Series(0, index=df.index)
-        onl_mtd = safe(df[onl_mtd_c]) if onl_mtd_c and onl_mtd_c in df.columns else pd.Series(0, index=df.index)
-        extras[f"_mmtd_{kanal}"] = mag_mtd
-        extras[f"_omtd_{kanal}"] = onl_mtd
-        extras[f"_tmtd_{kanal}"] = mag_mtd + onl_mtd
-
-    # PSF (fiyat) - kanal bagimsiz
-    psf_c = find_col(df, "PSF")
-    extras["_psf"] = safe(df[psf_c]) if psf_c and psf_c in df.columns else pd.Series(0, index=df.index)
-
-    # WMS ve DEPO STOK
-    wms_c = find_col(df, "WMS")
-    extras["_wms"] = safe(df[wms_c]).clip(lower=0) if wms_c and wms_c in df.columns else pd.Series(0, index=df.index)
-    depo_c = find_col(df, "DEPO STOK")
-    extras["_depo"] = safe(df[depo_c]).clip(lower=0) if depo_c and depo_c in df.columns else pd.Series(0, index=df.index)
-
-    # Tek seferde birleştir - fragmentation yok
-    df = pd.concat([df, pd.DataFrame(extras, index=df.index)], axis=1)
-    return df
 
 def get_col_val(df, row, name, default=""):
     c = find_col(df, name)
@@ -457,7 +504,7 @@ def gitmeyen_df(df, kanal):
     sub["Gidis Yuzde"] = sub.apply(gidis_pct, axis=1)
     sub["Gidis Durumu"] = sub["Gidis Yuzde"].apply(gidis_durum)
 
-    sevk_c   = find_col(df, cfg["sevk"])
+    sevk_c   = find_col(df, cfg.get("sevk","")) if cfg.get("sevk","") else None
     kat_c    = find_col(df, "ANA KATEGORI")
     alt_c    = find_col(df, "ALT KATEGORI")
     aile_c   = find_col(df, "AYAKKABI AILE")
