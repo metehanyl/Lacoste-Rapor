@@ -63,8 +63,8 @@ KANALLAR = {
         "emoji":       "Intersport",
     },
     "Lacoste": {
-        "sip_haric":   ["TR Siparis Toplam"],
-        "sip_dahil":   ["TR Siparis Toplam", "TR Devir Adet"],
+        "sip_haric":   ["TR Sipariş Toplam"],
+        "sip_dahil":   ["TR Sipariş Toplam", "TR Devir Adet"],
         "mag_ytd":     "TY SLSU(OMSHaric) Lacoste",
         "mag_sh":      "TY SLSU(OMSHaric) Lacoste Son Hafta",
         "mag_mtd":     "Aylik TY SLSU(OMSHaric) Lacoste",
