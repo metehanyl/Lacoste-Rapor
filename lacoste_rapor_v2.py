@@ -1077,8 +1077,8 @@ def uret_html_cift(df_aw, df_ss, hafta_str, aw_adi, ss_adi):
 
     js_data = "\n".join(js_data_bloklar)
 
-    kmeta_aw = J({k: {"renk": KANALLAR[k]["renk"], "git_cnt": sezon_data["26AW"]["kanal_data"][k]["git_cnt"]} for k in KANALLAR})
-    kmeta_ss = J({k: {"renk": KANALLAR[k]["renk"], "git_cnt": sezon_data["26SS"]["kanal_data"][k]["git_cnt"]} for k in KANALLAR})
+    kmeta_aw = J({k: {"renk": KANALLAR[k]["renk"], "git_cnt": sezon_data["26AW"]["kanal_data"][k]["git_cnt"]} for k in KANALLAR if len(sezon_data["26AW"]["kanal_data"][k]["urunler"]) > 0})
+    kmeta_ss = J({k: {"renk": KANALLAR[k]["renk"], "git_cnt": sezon_data["26SS"]["kanal_data"][k]["git_cnt"]} for k in KANALLAR if len(sezon_data["26SS"]["kanal_data"][k]["urunler"]) > 0})
 
     # CSS'i uret_html'den al (tek seferlik, sadece style bloğu)
     _tmp_html = uret_html(df_aw, "tmp", "tmp.xlsx")
@@ -1093,6 +1093,8 @@ def uret_html_cift(df_aw, df_ss, hafta_str, aw_adi, ss_adi):
         hoss_js_ust  = J(sd["hoss"].get("ozet_ust", []))
         hoss_js_cin  = J(sd["hoss"].get("ozet_cin", []))
         for k, cfg in KANALLAR.items():
+            if len(sd["kanal_data"][k]["urunler"]) == 0:
+                continue  # Ürün yok, sekme/panel oluşturma
             git = sd["kanal_data"][k]["git_cnt"]
             paneller += f"""
 <div class="panel" id="{sezon_pfx}-panel-{k}">
@@ -1269,8 +1271,10 @@ def uret_html_cift(df_aw, df_ss, hafta_str, aw_adi, ss_adi):
         tabs = "\n".join([
             f'<button class="tab" style="--tk:{KANALLAR[k]["renk"]}" onclick="switchTab(\'{k}\',this,\'{sezon_pfx}\')">{k} <span class="tc">{sd["kanal_data"][k]["git_cnt"]} bekleyen</span></button>'
             for k in KANALLAR
+            if len(sd["kanal_data"][k]["urunler"]) > 0
         ])
-        tabs += f'\n<button class="tab hoss-tab" onclick="switchTab(\'HOSS\',this,\'{sezon_pfx}\')">&#x2726; HOSS x Lacoste <span class="tc">{sd["hoss"].get("count",0)} urun</span></button>'
+        if sd["hoss"].get("count", 0) > 0:
+            tabs += f'\n<button class="tab hoss-tab" onclick="switchTab(\'HOSS\',this,\'{sezon_pfx}\')">&#x2726; HOSS x Lacoste <span class="tc">{sd["hoss"].get("count",0)} urun</span></button>'
         return f'<div class="tab-bar" id="{sezon_pfx}-tab-bar">{tabs}</div>'
 
     panels_aw = kanal_paneller(sezon_data["26AW"], "AW")
