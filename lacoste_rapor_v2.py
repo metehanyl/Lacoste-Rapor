@@ -1883,17 +1883,10 @@ document.addEventListener("click",function(e){{
 
 window["AW_KMETA"]=AW_KMETA;
 window["SS_KMETA"]=SS_KMETA;
-document.addEventListener("DOMContentLoaded",function(){{
+setTimeout(function(){{
   var t=document.querySelector("#sz-wrap-AW .tab");
   if(t){{t.click();}}
-  else{{
-    // DOMContentLoaded sonrası çalıştır
-    setTimeout(function(){{
-      var t2=document.querySelector("#sz-wrap-AW .tab");
-      if(t2)t2.click();
-    }},100);
-  }}
-}});
+}},50);
 // Fallback: sayfa zaten yüklendiyse
 if(document.readyState==="complete"||document.readyState==="interactive"){{
   setTimeout(function(){{
